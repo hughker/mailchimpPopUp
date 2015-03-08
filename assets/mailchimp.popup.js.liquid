@@ -1,61 +1,25 @@
-var _MailChimpPreloadChecks = 0;
-
-(function(){
-	if(document.getElementById('mailchimp-form-validate') == null){
-		var head = document.getElementsByTagName('head')[0];
-		var script = document.createElement('script');
-		script.id = 'mailchimp-form-validate';
-		script.type = 'text/javascript';
-		script.src = '{{ "jquery.form-n-validate.js" | asset_url }}';
-		head.appendChild(script);
-	}
-	setTimeout('CheckMailchimpScriptAndLoadPopup();', 250);
-})();
-
-var CheckMailchimpScriptAndLoadPopup = function(){
-    if (_MailChimpPreloadChecks > 40)
-	  return;
-	_MailChimpPreloadChecks++;
-	try {
-        var validatorLoaded = $("#fake-form1").validate();
-    }catch (err) {
-        setTimeout('CheckMailchimpScriptAndLoadPopup();', 250);
-        return false;
-    }
-	
-	var query = T3Core.GetQueryStringByKey('signup');
-	if(_ShowPopupOnMobileDevices || !T3Core.IsMobileDevice()){
-		if(query == ''){
-			T3MCP.Initialize();
-		}else if(query == 1){
-			T3MCP.Initialize();
-			T3MCP.ShowForm();
-		}
-	}
-};
-
 var VisitingCookieTracker = { Status: '', PageView: 0, Visits: 0, PopupAlreadyShownOnVisit: [] };
-
 var T3MCP = {
-    HideForm: function (saveCookie) {
-        T3MCP.Popup.hide();
-        if (saveCookie) {
-            //this.SaveJsonToCookie(_MC_cookie_name,CookieValues.ErrorInSubmitted,'','','',1);
+    HideForm: function(trackEvent) {
+        if(!T3MCP.UserHasSignedup && trackEvent){
+            _MCPopupCustomCallBack.ClosedWithoutSignup();
         }
+
+        T3MCP.Popup.removeClass('modalize');
     },
     ReadCookiesAndShowPopup: function () {
         var sessionCookie = T3Core.CookieManager.ReadCookie(_SessionCookieName);
-        var mce_cookie_value = this.ReadJsonFromCookie(_MC_cookie_name);
+        var mce_cookie_value = this.ReadJsonFromCookie(_MCCookieName);
 
         if (mce_cookie_value == null && sessionCookie == null) {
             T3Core.CookieManager.CreateCookie(_SessionCookieName, 1);
-            this.SaveJsonToCookie(_MC_cookie_name, CookieValues.ShowOnNextVisit, 1, 1, '', 30);
-            mce_cookie_value = this.ReadJsonFromCookie(_MC_cookie_name);
+            this.SaveJsonToCookie(_MCCookieName, CookieValues.ShowOnNextVisit, 1, 1, '', 30);
+            mce_cookie_value = this.ReadJsonFromCookie(_MCCookieName);
         } else {
 
             if (mce_cookie_value == null) {
-                this.SaveJsonToCookie(_MC_cookie_name, CookieValues.ShowOnNextVisit, 1, 1, '', 30);
-                mce_cookie_value = this.ReadJsonFromCookie(_MC_cookie_name);
+                this.SaveJsonToCookie(_MCCookieName, CookieValues.ShowOnNextVisit, 1, 1, '', 30);
+                mce_cookie_value = this.ReadJsonFromCookie(_MCCookieName);
             }
 
             if (sessionCookie == null) {
@@ -64,7 +28,7 @@ var T3MCP = {
                 var pageViewNumber = obj.PageView;
                 T3Core.CookieManager.CreateCookie(_SessionCookieName, visitNumber);
                 if (obj.Status == CookieValues.ShowOnNextVisit) {
-                    this.SaveJsonToCookie(_MC_cookie_name, CookieValues.ShowOnNextVisit, pageViewNumber, visitNumber, '', 30);
+                    this.SaveJsonToCookie(_MCCookieName, CookieValues.ShowOnNextVisit, pageViewNumber, visitNumber, '', 30);
                 }
             }
         }
@@ -107,7 +71,7 @@ var T3MCP = {
         ShowPopup: false
     },
     ProcessCookiesValuesAndShowPopupIfNeeded: function () {
-        var cookieObj = this.ReadJsonFromCookie(_MC_cookie_name);
+        var cookieObj = this.ReadJsonFromCookie(_MCCookieName);
         this.DataObj.PageView = parseInt(cookieObj.PageView);
         this.DataObj.Visits = parseInt(cookieObj.Visits);
         if (cookieObj.PopupAlreadyShownOnVisit.length > 0) {
@@ -120,10 +84,10 @@ var T3MCP = {
         if (this.DataObj.NeedToShowPopupOnCurrentVisit) {
             if (this.DataObj.PageView <= _PageViewNumber) {
                 if (this.DataObj.NeedToShowPopupOnCurrentPageView) {
-                    this.SaveJsonToCookie(_MC_cookie_name, CookieValues.ShowOnNextVisit, 1, this.DataObj.Visits, this.DataObj.Visits, 30);
+                    this.SaveJsonToCookie(_MCCookieName, CookieValues.ShowOnNextVisit, 1, this.DataObj.Visits, this.DataObj.Visits, 30);
                 } else {
                     var pageview = this.DataObj.PageView + 1;
-                    this.SaveJsonToCookie(_MC_cookie_name, CookieValues.ShowOnNextVisit, pageview, this.DataObj.Visits, '', 30);
+                    this.SaveJsonToCookie(_MCCookieName, CookieValues.ShowOnNextVisit, pageview, this.DataObj.Visits, '', 30);
                 }
             }
         }
@@ -139,9 +103,10 @@ var T3MCP = {
     },
     ShowForm: function (delay) {
         var delay = delay == null ? _Popup_delay : delay;
-        $('.mc_embed_close', T3MCP.Popup).show();
-		setTimeout(function () {
-            T3MCP.Popup.fadeIn();
+        $('.popupClose', T3MCP.Popup).show();
+        setTimeout(function () {
+            T3MCP.Popup.addClass('modalize');
+            _MCPopupCustomCallBack.OnShow();
         }, delay);
 
     },
@@ -149,7 +114,7 @@ var T3MCP = {
         var bValidatorOptions = {
             singleError: true
         };
-		
+        
         $('form', T3MCP.Popup).bValidator(bValidatorOptions);
     },
     FormSubmit: function () {
@@ -163,13 +128,14 @@ var T3MCP = {
                 contentType: "application/json; charset=utf-8",
                 success: T3MCP.Success
             };
-            formElem.ajaxSubmit(options);
+            $.ajax(options);
+            _MCPopupCustomCallBack.OnFormSubmitted();
             e.preventDefault();
             return false;
         });
     },
     InitCustomEvents: function () {
-        $('.mc_embed_close', T3MCP.Popup).click(function () {
+        $('.popupClose', T3MCP.Popup).click(function () {
             T3MCP.HideForm(true);
             return false;
         });
@@ -186,15 +152,15 @@ var T3MCP = {
                 T3MCP.HideForm(true);
             }
         });
-		
-		$(".popupTrigger").click(function (e) {
+        
+        $(".popupTrigger").click(function (e) {
             T3MCP.ShowForm(500);
             e.stopPropagation();
             return false;
         });
     },
     Initialize: function () {
-		this.Popup = $('.modalHolder');
+        this.Popup = $('.modalHolder');
         this.HideForm(false);
         this.ReadCookiesAndShowPopup();
         this.InitCustomEvents();
@@ -202,29 +168,38 @@ var T3MCP = {
         T3MCP.FormSubmit();
     },
     Success: function (resp) {
-		var responseWrapper = $('.response-wrapper', T3MCP.Popup);
+        var responseWrapper = $('.response-wrapper', T3MCP.Popup);
         $('.response', responseWrapper).hide();
         if (resp.result == "success") {
-            T3MCP.SaveJsonToCookie(_MC_cookie_name, CookieValues.HasSubmitted, '', '', '', 365);
-            $('#mce-success-response', responseWrapper).html(resp.msg).show();
-            $('input[type="text"]', T3MCP.Popup).val('');
-            $('input[type="submit"]', T3MCP.Popup).prop('disabled', 'disabled');
-
-            setTimeout(function () {
-                T3MCP.HideForm();
-            }, 4500);
-
+            T3MCP.SaveJsonToCookie(_MCCookieName, CookieValues.HasSubmitted, '', '', '', 365);
+            if(_MCAllowDefaultSuccessCallBack){
+                $('.mce-success-response', responseWrapper).html(resp.msg).show();
+                $('input[type="text"]', T3MCP.Popup).val('');
+                $('input[type="submit"]', T3MCP.Popup).prop('disabled', 'disabled');
+                setTimeout(function () {
+                    T3MCP.HideForm();
+                }, 4500);
+            }
+            
+            T3MCP.UserHasSignedup = true;
+            _MCPopupCustomCallBack.Success(resp.msg);
+            
         }else{
             //check if user has already subscribed..
             if(resp.msg.indexOf('Click here to update your profile') != -1){
-              T3MCP.SaveJsonToCookie(_MC_cookie_name, CookieValues.HasSubmitted, '', '', '', 365);
-              $('#mce-success-response', responseWrapper).html('Thank you.').show();
-              $('input[type="text"]', T3MCP.Popup).val('');
-              $('input[type="submit"]', T3MCP.Popup).prop('disabled', 'disabled');
+              T3MCP.SaveJsonToCookie(_MCCookieName, CookieValues.HasSubmitted, '', '', '', 365);
               
-              setTimeout(function () {
-                T3MCP.HideForm();
-              }, 1500);
+              if(_MCAllowDefaultSuccessCallBack){
+                  $('.mce-success-response', responseWrapper).html('Thank you.').show();
+                  $('input[type="text"]', T3MCP.Popup).val('');
+                  $('input[type="submit"]', T3MCP.Popup).prop('disabled', 'disabled');
+                  setTimeout(function () {
+                    T3MCP.HideForm();
+                  }, 1500);
+              }
+              
+              T3MCP.UserHasSignedup = true;
+              _MCPopupCustomCallBack.Success(resp.msg);
               
               return; 
             }
@@ -254,14 +229,29 @@ var T3MCP = {
             msg = resp.msg;
         }
         try{
-            $('#mce-' + resp.result + '-response', T3MCP.Popup).show();
-            $('#mce-' + resp.result + '-response', T3MCP.Popup).html(msg);
+            $('.mce-' + resp.result + '-response', T3MCP.Popup).show();
+            $('.mce-' + resp.result + '-response', T3MCP.Popup).html(msg);
         }catch(e) {
-            $('#mce-' + resp.result + '-response').show();
-            $('#mce-' + resp.result + '-response').html(msg);
+            $('.mce-' + resp.result + '-response').show();
+            $('.mce-' + resp.result + '-response').html(msg);
         }
       
-        T3MCP.SaveJsonToCookie(_MC_cookie_name, CookieValues.ErrorInSubmitted, '', '', '', 2);
+        T3MCP.SaveJsonToCookie(_MCCookieName, CookieValues.ErrorInSubmitted, '', '', '', 2);
+        _MCPopupCustomCallBack.Error(msg);
     },
-	Popup:null
+    Popup:null,
+    UserHasSignedup:false
 };
+
+(function(){
+    var query = T3Core.GetQueryStringByKey('signup');
+    var isMailChimpGoalkeeperPresent =  T3Core.CookieManager.ReadCookie('goal') != null || T3Core.GetQueryStringByKey('goal') != "";
+    if(_ShowPopupOnMobileDevices || !T3Core.IsMobileDevice()){
+        if(query == '' && !isMailChimpGoalkeeperPresent){
+            T3MCP.Initialize();
+        }else if(query == 1){
+            T3MCP.Initialize();
+            T3MCP.ShowForm();
+        }
+    }
+})();
